@@ -17,7 +17,7 @@ from tqdm import tqdm
 
 
 #%% LOAD THE DATA
-data = pd.read_excel("database/img_importance.xlsx", usecols="B:H")
+data = pd.read_excel("database/teng.xlsx", usecols="B:V")
 data.head(20)
 
 
@@ -39,8 +39,7 @@ def calculate_rms(start_r, start_c, b_size, src_image):
       block[r_step][c_step] = luminance
       flag_matrix[start_r+r_step][start_c+c_step]=1
   contrast = block.std()/block.mean()
-  if(contrast ==0):
-    print("co")
+  
   return contrast
 
 def dfs(sr,sc,b_size,src_image):
@@ -59,7 +58,9 @@ def combine(contrast_array):
   #   return 0
   square = np.square(np.array(contrast_array))
   sum_contrast = np.sum(square)
-  print(len(contrast_array))
+  
+  if len(contrast_array)==0:
+    return 0
   a_contrast = 50/len(contrast_array)*np.sqrt(sum_contrast)
   return a_contrast
 
@@ -67,7 +68,7 @@ def  divide_Block(obj_idx, b_size, src_img):
   for sr in range(num_rows):
       for sc in range(num_cols):
         dfs(sr,sc,b_size,src_img)
-  print(np.sum(flag_matrix==1))
+  
   return  combine(contrast_array)      
    
 #%%
@@ -76,16 +77,17 @@ tot_num_objs = 581
 obj_sizes = np.zeros(tot_num_objs)
 obj_locs = np.zeros(tot_num_objs)
 obj_contrasts = np.zeros(tot_num_objs)
-obj_m_rgbs = np.zeros(tot_num_objs)
-obj_m_sats = np.zeros(tot_num_objs)
+obj_edges = np.zeros(tot_num_objs)
+obj_fores = np.zeros(tot_num_objs)
+obj_sifts = np.zeros(tot_num_objs)
 idx = 0
 
 # for each image...
 # (show a progressbar using tqdm because computing features 
 # can take a long time)
-for img_idx in tqdm(range(27, 28)):
+for img_idx in tqdm(range(1, 151)):
   img_name = "img" + str(img_idx)
-  print("--- Image:", img_name, " -----------")
+  
   
   # extract the dataframe rows just for this image
   img_data = data.loc[data["img_name"]==img_name]
@@ -101,12 +103,26 @@ for img_idx in tqdm(range(27, 28)):
 
   # ipcv_plt.imshow(src_img, zoom=0.5)
   # ipcv_plt.imshow(msk_img, zoom=0.5)
+  
+  edge = cv.Canny(src_img, 100, 200)
+  edge_matrix = np.array(edge)
+  
+  sift = cv.xfeatures2d.SIFT_create()
+  k = sift.detect(src_img, None)
+  pts = [p.pt for p in k]
+  sift_matrix = np.array(pts).astype(int)
+  sift_matrix = np.unique(sift_matrix, axis=0)
+  sift_total = sift_matrix.shape[0]
+  sift_flag = np.zeros(shape=(num_rows, num_cols))
+  for i in range(len(sift_matrix)):
+    sift_flag[sift_matrix[i][1]][sift_matrix[i][0]] = 1
+  
   flag_matrix = np.zeros((num_rows, num_cols))
   class_matrix = np.ones((num_rows, num_cols))*-1
   img_B_size = []
   # for each object of the image...
   for obj_idx, obj_data in img_data.iterrows():
-    print(img_data)
+    
     contrast_array = []
     obj_name = obj_data["obj_name"]
     msk_r = obj_data["R"]
@@ -122,7 +138,11 @@ for img_idx in tqdm(range(27, 28)):
     avg_r = 0
     avg_c = 0
     obj_size = 0
-   
+    obj_edge_size = 0
+    obj_in_3pix =0
+    obj_total_3pix =0
+    obj_sift_size = 0
+    
     for r in range(num_rows):
       for c in range(num_cols):
         if msk_img[r, c, 0] == msk_r and \
@@ -131,7 +151,22 @@ for img_idx in tqdm(range(27, 28)):
           avg_r += r
           avg_c += c
           obj_size += 1          
+          
           class_matrix[r][c] = obj_idx
+          
+          if edge_matrix[r, c] == 255:   
+            obj_edge_size += 1
+            
+          if r > 3 or r < num_rows-3:
+            if c < 3 or c > num_cols-3:
+               obj_in_3pix += 1
+               
+          if sift_flag[r, c] == 1:
+             obj_sift_size+=1
+        if r > 3 or r < num_rows-3:
+            if c < 3 or c > num_cols-3:
+                obj_total_3pix += 1     
+          
           
           
           
@@ -150,13 +185,16 @@ for img_idx in tqdm(range(27, 28)):
 
     B_size = max(4, int(0.05*np.sqrt(obj_size)+0.05))
     img_B_size.append(B_size)
-    print(B_size, "idx", obj_idx)
     
-    obj_contrast =divide_Block(obj_idx, B_size, src_img)
+    
+    # obj_contrast =divide_Block(obj_idx, B_size, src_img)
     # obj_contrast  = divide(B_size)
     
-   
+    obj_edge_size_percent = obj_edge_size / obj_size  
     
+    obj_fore = 2-2*obj_in_3pix/obj_total_3pix
+    
+    obj_sift_per = obj_sift_size/sift_total
     
     # print("obj_size =", obj_size)
     # print("obj_loc =", obj_loc)
@@ -166,6 +204,9 @@ for img_idx in tqdm(range(27, 28)):
     obj_sizes[idx] = obj_size
     obj_locs[idx] = obj_loc
     obj_contrasts[idx] = obj_contrast
+    obj_edges[idx] = obj_edge_size_percent
+    obj_fores[idx] = obj_fore
+    obj_sifts[idx] = obj_sift_per
     
     
     idx += 1
@@ -180,12 +221,13 @@ for img_idx in tqdm(range(27, 28)):
 data.insert(data.shape[1]-1, "size", obj_sizes)
 data.insert(data.shape[1]-1, "loc", obj_locs)
 data.insert(data.shape[1]-1, "contrast", obj_contrasts)
-# data.insert(data.shape[1]-1, "m_rgb", obj_m_rgbs)
-# data.insert(data.shape[1]-1, "m_sat", obj_m_sats*100)
+data.insert(data.shape[1]-1, "edge", obj_edges*10)
+data.insert(data.shape[1]-1, "fore", obj_fores*10)
+data.insert(data.shape[1]-1, "sift", obj_sifts)
 data.head(20)
 
 # you can save to an Excel file to check the values
-#data.to_excel("imp/tmp.xlsx")
+data.to_excel("database/tmp.xlsx")
 
 
 #%% SPLIT INTO TRAINING AND TESTING
@@ -195,8 +237,8 @@ data_tst = data.iloc[302:] # last 75 images
 
 # in this demo, we will use only two features
 # (you can use more after you've computed them)
-feature_names = ["size", "loc", "contrast"]
-
+feature_names = ["FB"]
+# feature_names = ["size","loc","FB","dis_L","dis_AB","cat","importance","points","lines"]
 X_trn = np.array(data_trn[feature_names])
 y_trn = np.array(data_trn["class"])
 
@@ -206,8 +248,8 @@ y_tst = np.array(data_tst["class"])
 
 #%% BAYES CLASSIFICATION
 
-# model = GaussianNB()
-model = SVC(kernel='poly', degree=2, coef0=1, C=10)
+model = GaussianNB()
+# model = SVC(kernel='linear', C=2)
 # model = DecisionTreeClassifier()
 model.fit(X_trn, y_trn)
 

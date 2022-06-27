@@ -1,5 +1,7 @@
 #%% LOAD THE LIBRARIES
 from sklearn.naive_bayes import GaussianNB
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.svm import SVC
 from sklearn.metrics import accuracy_score
 
 import numpy as np
@@ -24,16 +26,7 @@ data.head(20)
 #%% LOOP THROUGH THE IMAGES AND COMPUTE FEATURES
 # (this code shows only size and location features; you need
 # to write your own code to compute more features)
-def check(start_r, start_c, class_matrix, obj_idx, b_size):
 
-  for r_step in range(b_size):
-    for c_step in range(b_size):
-      if(start_r + b_size > class_matrix.shape[0]) or (start_c + b_size > class_matrix.shape[1]):
-        return False
-      if (class_matrix[start_r+r_step][start_c+c_step] != obj_idx) or (flag_matrix[start_r+r_step][start_c+c_step] == 1):
-        return False
-      
-  return True
 
 def calculate_rms(start_r, start_c, b_size, src_image):
   block = np.zeros((b_size, b_size))
@@ -44,61 +37,55 @@ def calculate_rms(start_r, start_c, b_size, src_image):
       blue = src_image[start_r+r_step][start_c+c_step][2]
       luminance = 0.2126*red + 0.7152*green + 0.0722*blue 
       block[r_step][c_step] = luminance
+      flag_matrix[start_r+r_step][start_c+c_step]=1
   contrast = block.std()/block.mean()
+  if(contrast ==0):
+    print("co")
   return contrast
 
-# def dfs(start_r,  start_c,  b_size, src_image, contrast_array):
+def dfs(sr,sc,b_size,src_image):
+  for b_r in range(b_size):
+    for b_c in range(b_size):
+      if (sr+b_r+1 > src_img.shape[0] or sc+b_c+1 > src_img.shape[1]):
+        return
+      if(class_matrix[sr+b_r][sc+b_c] != obj_idx or flag_matrix[sr+b_r][sc+b_c] == 1):
+        return
+  contrast_array.append(calculate_rms(sr, sc, b_size, src_image))
   
-#   if (start_c < 0 or start_r < 0 or (start_r + b_size) > num_rows or (start_c + b_size) > num_cols):
-#     return
-  
-#   if (not check(start_r, start_c, class_matrix, obj_idx, b_size)):
-#     dfs(start_r, start_c + 1, b_size, src_image, contrast_array)
-#     dfs(start_r, start_c - 1, b_size, src_image, contrast_array)
-#     dfs(start_r+1, start_c, b_size, src_image, contrast_array)
-#     dfs(start_r-1, start_c, b_size, src_image, contrast_array)
-#   else:
-#     print(start_r, start_c)
-#     for r_step in range(b_size):
-#       for c_step in range(b_size):
-#         flag_matrix[start_r+r_step][start_c+c_step]=1
-#     contrast_array.append(calculate_rms(start_r, start_c, b_size, src_image))
-#     return len(contrast_array)  
+
+   
 def combine(contrast_array):
-  if (len(contrast_array)==0):
-    return 0
+  # if (len(contrast_array)==0):
+  #   return 0
   square = np.square(np.array(contrast_array))
   sum_contrast = np.sum(square)
+  print(len(contrast_array))
   a_contrast = 50/len(contrast_array)*np.sqrt(sum_contrast)
   return a_contrast
 
-def divide(b_size):
-    for sr in range(num_rows):
+def  divide_Block(obj_idx, b_size, src_img):
+  for sr in range(num_rows):
       for sc in range(num_cols):
-        if class_matrix[sr][sc] == obj_idx and flag_matrix[sr][sc] == 0:
-         
-          if check(sr, sc, class_matrix, obj_idx, b_size):
-            for r_step in range(b_size):
-              for c_step in range(b_size):
-                flag_matrix[sr+r_step][sc+c_step]=1
-            contrast_array.append(calculate_rms(sr, sc, b_size, src_img))
-            
-    return combine(contrast_array) 
-
+        dfs(sr,sc,b_size,src_img)
+  print(np.sum(flag_matrix==1))
+  return  combine(contrast_array)      
+   
+#%%
 # lists to hold the feature values
 tot_num_objs = 581
 obj_sizes = np.zeros(tot_num_objs)
 obj_locs = np.zeros(tot_num_objs)
 obj_contrasts = np.zeros(tot_num_objs)
 obj_m_rgbs = np.zeros(tot_num_objs)
+obj_m_sats = np.zeros(tot_num_objs)
 idx = 0
 
 # for each image...
 # (show a progressbar using tqdm because computing features 
 # can take a long time)
-for img_idx in tqdm(range(1, 151)):
+for img_idx in tqdm(range(27, 28)):
   img_name = "img" + str(img_idx)
-  # print("--- Image:", img_name, " -----------")
+  print("--- Image:", img_name, " -----------")
   
   # extract the dataframe rows just for this image
   img_data = data.loc[data["img_name"]==img_name]
@@ -116,9 +103,10 @@ for img_idx in tqdm(range(1, 151)):
   # ipcv_plt.imshow(msk_img, zoom=0.5)
   flag_matrix = np.zeros((num_rows, num_cols))
   class_matrix = np.ones((num_rows, num_cols))*-1
+  img_B_size = []
   # for each object of the image...
   for obj_idx, obj_data in img_data.iterrows():
-
+    print(img_data)
     contrast_array = []
     obj_name = obj_data["obj_name"]
     msk_r = obj_data["R"]
@@ -134,9 +122,7 @@ for img_idx in tqdm(range(1, 151)):
     avg_r = 0
     avg_c = 0
     obj_size = 0
-    sum_red = 0
-    sum_green = 0
-    sum_blue = 0
+   
     for r in range(num_rows):
       for c in range(num_cols):
         if msk_img[r, c, 0] == msk_r and \
@@ -146,14 +132,16 @@ for img_idx in tqdm(range(1, 151)):
           avg_c += c
           obj_size += 1          
           class_matrix[r][c] = obj_idx
-          sum_red += src_img[r, c, 0]
-          sum_green += src_img[r, c, 1]
-          sum_blue += src_img[r, c, 0]
+          
+          
+          
     # compute the center (r,c) of the object
     avg_r /= obj_size
     avg_c /= obj_size
     
-    obj_m_rgb = (sum_red+sum_blue+sum_green)/obj_size/3
+  
+   
+    
     # loc is the scaled avg. distance from the center
     # (actually, the scaling doesn't matter)
     obj_loc = \
@@ -161,8 +149,10 @@ for img_idx in tqdm(range(1, 151)):
     obj_loc = 100*obj_loc/289.13175
 
     B_size = max(4, int(0.05*np.sqrt(obj_size)+0.05))
+    img_B_size.append(B_size)
+    print(B_size, "idx", obj_idx)
     
-    
+    obj_contrast =divide_Block(obj_idx, B_size, src_img)
     # obj_contrast  = divide(B_size)
     
    
@@ -175,9 +165,11 @@ for img_idx in tqdm(range(1, 151)):
     # store the computed features in the lists
     obj_sizes[idx] = obj_size
     obj_locs[idx] = obj_loc
-    # obj_contrasts[idx] = obj_contrast
-    obj_m_rgbs[idx]= obj_m_rgb
+    obj_contrasts[idx] = obj_contrast
+    
+    
     idx += 1
+
 
 
 
@@ -187,8 +179,9 @@ for img_idx in tqdm(range(1, 151)):
 # insert the feature lists into the dataframe
 data.insert(data.shape[1]-1, "size", obj_sizes)
 data.insert(data.shape[1]-1, "loc", obj_locs)
-# data.insert(data.shape[1]-1, "contrast", obj_contrasts)
-data.insert(data.shape[1]-1, "m_rgb", obj_m_rgbs)
+data.insert(data.shape[1]-1, "contrast", obj_contrasts)
+# data.insert(data.shape[1]-1, "m_rgb", obj_m_rgbs)
+# data.insert(data.shape[1]-1, "m_sat", obj_m_sats*100)
 data.head(20)
 
 # you can save to an Excel file to check the values
@@ -202,7 +195,7 @@ data_tst = data.iloc[302:] # last 75 images
 
 # in this demo, we will use only two features
 # (you can use more after you've computed them)
-feature_names = ["size", "loc", "m_rgb"]
+feature_names = ["size", "loc", "contrast"]
 
 X_trn = np.array(data_trn[feature_names])
 y_trn = np.array(data_trn["class"])
@@ -213,7 +206,9 @@ y_tst = np.array(data_tst["class"])
 
 #%% BAYES CLASSIFICATION
 
-model = GaussianNB()
+# model = GaussianNB()
+model = SVC(kernel='poly', degree=2, coef0=1, C=10)
+# model = DecisionTreeClassifier()
 model.fit(X_trn, y_trn)
 
 y_trn_prd = model.predict(X_trn)
